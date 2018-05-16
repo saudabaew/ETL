@@ -22,20 +22,27 @@ public class SensorUtil {
 
     //на основе типа и набора параметров определяем режим работы машины в конкретный момент времени
     public long getMode(int unitType, String imeiAndDate,
-                       Map<String, Double> parameterP11,
-                       Map<String, Double> parameterP12,
-                       Map<String, Double> parameterP45,
-                       Map<String, Double> parameterB22,
-                       Map<String, Double> parameterP15,
-                       Map<String, Double> parameterP50) {
+                        Map<String, Double> parameterP11,
+                        Map<String, Double> parameterP12,
+                        Map<String, Double> parameterP45,
+                        Map<String, Double> parameterB22,
+                        Map<String, Double> parameterP15,
+                        Map<String, Double> parameterP50) {
 
         //виды режимов
-        long m0 = 0; long m1 = 1; long m2 = 2; long m3 = 3; long m4 = 4; long m5 = 5;
+        long m0 = 0;
+        long m1 = 1;
+        long m2 = 2;
+        long m3 = 3;
+        long m4 = 4;
+        long m5 = 5;
         long mode = 0;
 
         switch (unitType) {
             //расчет режимов для КУК
-            case 3: case 4: case 5:
+            case 3:
+            case 4:
+            case 5:
                 if (parameterP12.get(imeiAndDate) < 500 &&
                         parameterP11.get(imeiAndDate) < 0.5 &&
                         parameterP50.get(imeiAndDate) < 30 &&
@@ -68,8 +75,17 @@ public class SensorUtil {
                     mode = m5;
                     break;
                 }
-            //расчет режимов для ЗУК ACROS, VECTOR, PCM
-            case 6: case 8: case 9: case 10: case 11: case 12: case 13: case 14: case 15: case 16:
+                //расчет режимов для ЗУК ACROS, VECTOR, PCM
+            case 6:
+            case 8:
+            case 9:
+            case 10:
+            case 11:
+            case 12:
+            case 13:
+            case 14:
+            case 15:
+            case 16:
                 if (parameterP12.get(imeiAndDate) < 500 &&
                         parameterP11.get(imeiAndDate) > 0.5 &&
                         parameterP45.get(imeiAndDate) < 30 &&
@@ -102,8 +118,13 @@ public class SensorUtil {
                     mode = m5;
                     break;
                 }
-            //расчет режимов для ЗУК TORUM
-            case 17: case 18: case 19: case 20: case 21: case 25:
+                //расчет режимов для ЗУК TORUM
+            case 17:
+            case 18:
+            case 19:
+            case 20:
+            case 21:
+            case 25:
                 if (parameterP12.get(imeiAndDate) < 500 &&
                         parameterP11.get(imeiAndDate) > 0.5 &&
                         parameterP15.get(imeiAndDate) < 30 &&
@@ -207,122 +228,202 @@ public class SensorUtil {
         return sensors;
     }
 
-    public int modeOfSensor(long unitType, List<Sensor> sensors){
+    //опеределение режима работы на основе валидированных параметров
+    public int modeOfSensor(long unitType, long imei, LocalDateTime date, JdbcTemplate jdbcTemplateAgrotronic) {
         int mode;
 
-        Map<String, Double> sensorMap = new HashMap<>();
-        for (Sensor s: sensors) {
-            if (s.getParam_name().equals("P12") ||
-                    s.getParam_name().equals("P11") ||
-                    s.getParam_name().equals("P50") ||
-                    s.getParam_name().equals("B22") ||
-                    s.getParam_name().equals("P45") ||
-                    s.getParam_name().equals("P50")) {
-                sensorMap.put(s.getParam_name(), Double.parseDouble(s.getValue()));
+        //запрос с БД
+        String sql = "WITH sens AS (SELECT id, name, param AS param_name, valid_period_seconds, default_val, id_unit, unit_type FROM sensors) " +
+                "SELECT t2.param_name:: text, (Select CASE WHEN t2.valid_period_seconds is not null then (WITH values as\n" +
+                "                               (SELECT t1.value FROM public.sensor_history t1 where t1.imei = " + imei +
+                "                                and t1.date <= '" + date + "'\n" +
+                "                                and t1.date >= (timestamp '" + date + "' - CASE \n" +
+                "                                WHEN( make_interval (secs => t2.valid_period_seconds)) is not null \n" +
+                "                                THEN ( make_interval (secs => t2.valid_period_seconds) )\n" +
+                "                                ELSE interval '0' end) and t1.param_name = t2.param_name order by date desc limit 1)\n" +
+                "                                Select CASE WHEN (SELECT tt1.value  FROM values tt1)is not null\n" +
+                "                                       THEN  ((SELECT tt2.value  FROM values tt2) ::text)\n" +
+                "                                       ELSE ((Select default_val from sens s where s.id = t2.id )::text) END)\n" +
+                "                                       else (SELECT t1.value FROM public.sensor_history t1\n" +
+                "                                       where t1.imei = " + imei + " and t1.date <= '" + date + "' and t1.param_name = t2.param_name order by date desc limit 1)\n" +
+                "                               end):: text  as value FROM sens t2 where t2.id_unit = (SELECT tt3.id  FROM public.units tt3 where tt3.imei = " + imei + ") or \n" +
+                "                                       t2.unit_type = (SELECT tt4.unit_type  FROM public.units tt4 where tt4.imei = " + imei + ") and t2.param_name is not null";
+
+        List<Sensor> sensorList = new ArrayList<>();
+        //достаем из запроса необходимые параметры
+        List<Map<String, Object>> rows = jdbcTemplateAgrotronic.queryForList(sql);
+        for (Map row : rows) {
+            Sensor sensor = new Sensor();
+            String param_name = (String) row.get("param_name");
+            if (param_name.equals("P12") ||
+                    param_name.equals("P11") ||
+                    param_name.equals("P50") ||
+                    param_name.equals("B22") ||
+                    param_name.equals("P45") ||
+                    param_name.equals("PC4") ||
+                    param_name.equals("PD7") ||
+                    param_name.equals("PA5&1") ||
+                    param_name.equals("PA3&64") ||
+                    param_name.equals("PA4&4") ||
+                    param_name.equals("PC7") ||
+                    param_name.equals("P50")) {
+                sensor.setParam_name(param_name);
+                sensor.setValue((String) row.get("value"));
+                sensorList.add(sensor);
             }
         }
 
+        //создаем карту параметров
+        Map<String, Double> sensorMap = new HashMap<>();
+        for (Sensor s : sensorList) {
+            sensorMap.put(s.getParam_name(), Double.parseDouble(s.getValue()));
+        }
+
+        //на основе типа техники опеределяем форумулу расчета режима
         switch (toIntExact(unitType)) {
+            //расчет режима для КУС
+            case 2:
+                if (!(sensorMap.get("PD7") >= 500)){
+                    mode = 2;
+                    break;
+                }
+                if (!(sensorMap.get("PC4") * 0.2 >= 0.5)){
+                    mode = 3;
+                    break;
+                }
+                if (sensorMap.get("PA5&1") < 1 &&
+                        sensorMap.get("PA3&64") == 64 ||
+                        sensorMap.get("PA4&4") == 4){
+                    mode = 4;
+                    break;
+                }
+                if (!(sensorMap.get("PC4") * 0.2 >= 0.5) &&
+                        sensorMap.get("PA5&1") < 1 &&
+                        sensorMap.get("PA3&64") == 64 ||
+                        sensorMap.get("PA4&4") == 4){
+                    mode = 5;
+                    break;
+                }
+                if (sensorMap.get("PC4") * 0.2 >= 0.5){
+                    mode = 1;
+                    break;
+                }
             //расчет режимов для КУК
-            case 3: case 4: case 5:
-                if (sensorMap.get("P12") < 500 &&
-                        sensorMap.get("P11") < 0.5 &&
-                        sensorMap.get("P50") < 30 &&
-                        sensorMap.get("B22") != 1) {
-                    mode = 1;
-                    break;
-                }
-                if (sensorMap.get("P12") <= 500 &&
-                        sensorMap.get("P11") <= 0.5) {
+            case 3:
+            case 4:
+            case 5:
+                if (!(sensorMap.get("P12") >= 500)) {
                     mode = 2;
                     break;
                 }
-                if (sensorMap.get("P12") > 500 &&
-                        sensorMap.get("P11") <= 0.5 &&
-                        sensorMap.get("B22") != 1) {
+                if (!(sensorMap.get("P11") >= 0.5)) {
                     mode = 3;
                     break;
                 }
-                if (sensorMap.get("P12") > 500 &&
-                        sensorMap.get("P11") > 0.5 &&
-                        sensorMap.get("P50") > 30 &&
+                if (sensorMap.get("P50") >= 30 &&
                         sensorMap.get("B22") == 1) {
                     mode = 4;
                     break;
                 }
-                if (sensorMap.get("P12") > 500 &&
-                        sensorMap.get("P11") <= 0.5 &&
-                        sensorMap.get("P50") > 30 &&
+                if (!(sensorMap.get("P11") >= 0.5) &&
+                        sensorMap.get("P50") >= 30 &&
                         sensorMap.get("B22") == 1) {
                     mode = 5;
                     break;
                 }
-                //расчет режимов для ЗУК ACROS, VECTOR, PCM
-            case 6: case 8: case 9: case 10: case 11: case 12: case 13: case 14: case 15: case 16:
-                if (sensorMap.get("P12") < 500 &&
-                        sensorMap.get("P11") > 0.5 &&
-                        sensorMap.get("P45") < 30 &&
-                        sensorMap.get("B22") != 1) {
+                if (sensorMap.get("P11") >= 0.5) {
                     mode = 1;
                     break;
                 }
-                if (sensorMap.get("P12") <= 500 &&
-                        sensorMap.get("P11") <= 0.5) {
+                //расчет режимов для ЗУК ACROS 550, VECTOR 410, NOVA
+            case 7:
+            case 24:
+            case 26:
+                if (!(sensorMap.get("PD7") >= 500)) {
                     mode = 2;
                     break;
                 }
-                if (sensorMap.get("P12") > 500 &&
-                        sensorMap.get("P11") <= 0.5 &&
-                        sensorMap.get("B22") != 1) {
+                if (!(sensorMap.get("PC4") * 0.2 >= 0.5)) {
                     mode = 3;
                     break;
                 }
-                if (sensorMap.get("P12") > 500 &&
-                        sensorMap.get("P11") > 0.5 &&
-                        sensorMap.get("P45") > 30 &&
+                if (sensorMap.get("PC7") * 10 >= 30 &&
+                        sensorMap.get("PA3&64") == 64) {
+                    mode = 4;
+                    break;
+                }
+                if (!(sensorMap.get("PC4") * 0.2 >= 0.5) &&
+                        sensorMap.get("PC7") * 10 >= 30 &&
+                        sensorMap.get("PA3&64") == 64) {
+                    mode = 5;
+                    break;
+                }
+                if (sensorMap.get("PC4") * 0.2 >= 0.5) {
+                    mode = 1;
+                    break;
+                }
+                //расчет режимов для остальных ЗУК ACROS, VECTOR
+            case 6:
+            case 8:
+            case 9:
+            case 10:
+            case 11:
+            case 12:
+            case 13:
+            case 14:
+            case 15:
+            case 16:
+                if (!(sensorMap.get("P12") >= 500)) {
+                    mode = 2;
+                    break;
+                }
+                if (!(sensorMap.get("P11") >= 0.5)) {
+                    mode = 3;
+                    break;
+                }
+                if (sensorMap.get("P45") >= 30 &&
                         sensorMap.get("B22") == 1) {
                     mode = 4;
                     break;
                 }
-                if (sensorMap.get("P12") > 500 &&
-                        sensorMap.get("P11") <= 0.5 &&
-                        sensorMap.get("P45") > 30 &&
+                if (!(sensorMap.get("P11") >= 0.5) &&
+                        sensorMap.get("P45") >= 30 &&
                         sensorMap.get("B22") == 1) {
                     mode = 5;
+                    break;
+                }
+                if (sensorMap.get("P11") >= 0.5) {
+                    mode = 1;
                     break;
                 }
                 //расчет режимов для ЗУК TORUM
-            case 17: case 18: case 19: case 20: case 21: case 25:
-                if (sensorMap.get("P12") < 500 &&
-                        sensorMap.get("P11") > 0.5 &&
-                        sensorMap.get("P15") < 30 &&
-                        sensorMap.get("B22") != 1) {
-                    mode = 1;
-                    break;
-                }
-                if (sensorMap.get("P12") <= 500 &&
-                        sensorMap.get("P11") <= 0.5) {
+            case 17:
+            case 18:
+            case 19:
+            case 20:
+            case 21:
+            case 25:
+                if (!(sensorMap.get("P12") >= 500)) {
                     mode = 2;
                     break;
                 }
-                if (sensorMap.get("P12") > 500 &&
-                        sensorMap.get("P11") <= 0.5 &&
-                        sensorMap.get("B22") != 1) {
+                if (!(sensorMap.get("P11") >= 0.5)) {
                     mode = 3;
                     break;
                 }
-                if (sensorMap.get("P12") > 500 &&
-                        sensorMap.get("P11") > 0.5 &&
-                        sensorMap.get("P15") > 30 &&
+                if (sensorMap.get("P15") >= 30 &&
                         sensorMap.get("B22") == 1) {
                     mode = 4;
                     break;
                 }
-                if (sensorMap.get("P12") > 500 &&
-                        sensorMap.get("P11") <= 0.5 &&
-                        sensorMap.get("P15") > 30 &&
+                if (!(sensorMap.get("P11") >= 0.5) &&
+                        sensorMap.get("P15") >= 30 &&
                         sensorMap.get("B22") == 1) {
                     mode = 5;
+                    break;
+                }
+                if (sensorMap.get("P11") >= 0.5) {
+                    mode = 1;
                     break;
                 }
             default:

@@ -300,7 +300,6 @@ public class Scanner {
         DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
         LocalDateTime dateTime = LocalDateTime.parse(date, formatter);
         long imei = 864287037501648L;
-        List<Sensor> sensorList = modesHistoryUtil.sensorListForMode(imei, dateTime, jdbcTemplateAgrotronic);
 
         //получаем существующий набор машин с указанием их типа <IMEI, UNIT_TYPE>
         mapUnits = jdbcTemplateAgrotronic.query("SELECT imei, unit_type FROM public.units",
@@ -312,7 +311,7 @@ public class Scanner {
                     return results;
                 });
 
-        System.out.println("Mode = " + sensorUtil.modeOfSensor(mapUnits.get(imei), sensorList));
+        System.out.println("Mode = " + sensorUtil.modeOfSensor(mapUnits.get(imei), imei, dateTime, jdbcTemplateAgrotronic));
     }
 
     //функция заполнения таблицы modes_working
