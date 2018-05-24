@@ -292,7 +292,7 @@ public class Scanner {
 
     }
 
-    @PostConstruct
+    //@PostConstruct
     public void testOfSensor(){
         jdbcTemplateAgrotronic = new JdbcTemplate(dataSourceUtil.getDataSourceAgrotronic());
 
@@ -312,6 +312,22 @@ public class Scanner {
                 });
 
         System.out.println("Mode = " + sensorUtil.modeOfSensor(mapUnits.get(imei), imei, dateTime, jdbcTemplateAgrotronic));
+    }
+
+    @PostConstruct
+    public void sensorOfSQL() throws SQLException{
+        jdbcTemplateSakura = new JdbcTemplate(dataSourceUtil.getDataSourceSakura());
+
+        //получение всех imei из БД
+        List<Long> imeiList = jdbcTemplateSakura.queryForList(
+                "SELECT t1.imei from public.units t1 where id <> ANY (ARRAY[914,3359,916,106])", Long.class);
+
+        for (Long l: imeiList) {
+            LOG.info("IMEI  =  " + l + " finished");
+            //запуск SQL-скрипта по заполнению таблиц geo_history и sensor_history на исполнение
+            jdbcTemplateSakura.execute("SELECT agrotronic.get_sensor_s (?)");
+        }
+
     }
 
     //функция заполнения таблицы modes_working
